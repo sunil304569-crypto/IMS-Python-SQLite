@@ -1,0 +1,192 @@
+import sqlite3
+from datetime import datetime
+
+# ---------------- DATABASE ----------------
+class Database:
+    def __init__(self, db_name="ims.db"):
+        self.db_name = db_name
+
+    def connect(self):
+        return sqlite3.connect(self.db_name)
+
+
+# ---------------- USER SYSTEM ----------------
+class UserSystem:
+    def __init__(self, db):
+        self.db = db
+
+    def create_default_admin(self):
+        conn = self.db.connect()
+        cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT,
+            role TEXT
+        )
+        """)
+        cur.execute(
+            "INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)",
+            ("admin", "admin123", "admin")
+        )
+        conn.commit()
+        conn.close()
+
+    def login(self):
+        username = input("Username: ")
+        password = input("Password: ")
+
+        conn = self.db.connect()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT role FROM users WHERE username=? AND password=?",
+            (username, password)
+        )
+        result = cur.fetchone()
+        conn.close()
+
+        if result:
+            print("Login successful\n")
+            return result[0]
+        else:
+            print("Invalid login\n")
+            return None
+
+
+# ---------------- INVENTORY SYSTEM ----------------
+class InventorySystem:
+    def __init__(self, db):
+        self.db = db
+        self.setup_tables()
+
+    def setup_tables(self):
+        conn = self.db.connect()
+        cur = conn.cursor()
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS products (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            quantity INTEGER,
+            price REAL
+        )
+        """)
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER,
+            qty INTEGER,
+            total REAL,
+            date TEXT
+        )
+        """)
+
+        conn.commit()
+        conn.close()
+
+    def add_product(self):
+        name = input("Product name: ")
+        quantity = int(input("Quantity: "))
+        price = float(input("Price: "))
+
+        conn = self.db.connect()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO products (name, quantity, price) VALUES (?, ?, ?)",
+            (name, quantity, price)
+        )
+        conn.commit()
+        conn.close()
+        print("Product added\n")
+
+    def view_products(self):
+        conn = self.db.connect()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM products")
+        products = cur.fetchall()
+        conn.close()
+
+        print("\n--- PRODUCTS ---")
+        for p in products:
+            print(p)
+        print()
+
+    def buy_product(self):
+        product_id = int(input("Product ID: "))
+        buy_qty = int(input("Quantity to buy: "))
+
+        conn = self.db.connect()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT quantity, price FROM products WHERE id=?",
+            (product_id,)
+        )
+        result = cur.fetchone()
+
+        if not result:
+            print("Product not found\n")
+            conn.close()
+            return
+
+        stock, price = result
+
+        if buy_qty > stock:
+            print("Not enough stock\n")
+            conn.close()
+            return
+
+        new_qty = stock - buy_qty
+        total = buy_qty * price
+
+        cur.execute(
+            "UPDATE products SET quantity=? WHERE id=?",
+            (new_qty, product_id)
+        )
+        cur.execute(
+            "INSERT INTO transactions (product_id, qty, total, date) VALUES (?, ?, ?, ?)",
+            (product_id, buy_qty, total, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
+
+        conn.commit()
+        conn.close()
+        print(f"Purchase successful | Total = {total}\n")
+
+
+# ---------------- MAIN APP ----------------
+def main():
+    db = Database()
+    user_system = UserSystem(db)
+    inventory = InventorySystem(db)
+
+    user_system.create_default_admin()
+
+    role = None
+    while not role:
+        role = user_system.login()
+
+    while True:
+        print("1. View Products")
+        print("2. Buy Product")
+        if role == "admin":
+            print("3. Add Product")
+        print("0. Exit")
+
+        choice = input("Choose: ")
+
+        if choice == "1":
+            inventory.view_products()
+        elif choice == "2":
+            inventory.buy_product()
+        elif choice == "3" and role == "admin":
+            inventory.add_product()
+        elif choice == "0":
+            print("Goodbye")
+            break
+        else:
+            print("Invalid option\n")
+
+
+if __name__ == "__main__":
+    main()
